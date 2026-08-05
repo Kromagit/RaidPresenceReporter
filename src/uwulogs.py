@@ -3,11 +3,52 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 from typing import Any
+import re
+import unicodedata
 from urllib.parse import quote
 
 import requests
 
 from models import ParseResult
+
+
+EXCLUDED_BOSS_TERMS = (
+    "toravon",
+    "halion",
+    "anub",
+    "valithria",
+    "valy",
+)
+
+# Identifiants connus, utilisés seulement lorsque UwULogs fournit un ID numérique.
+EXCLUDED_BOSS_IDS = {38433, 39863, 34564, 36789}
+
+
+def _normalized_text(value: object) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", text.casefold()).strip()
+
+
+def _is_excluded_boss(key: object, boss_data: dict[str, Any]) -> bool:
+    numeric_candidates = [key, boss_data.get("id"), boss_data.get("npc_id"), boss_data.get("boss_id")]
+    for candidate in numeric_candidates:
+        try:
+            if int(candidate) in EXCLUDED_BOSS_IDS:
+                return True
+        except (TypeError, ValueError):
+            pass
+
+    text_candidates = [
+        key,
+        boss_data.get("name"),
+        boss_data.get("boss"),
+        boss_data.get("boss_name"),
+        boss_data.get("encounter"),
+        boss_data.get("encounter_name"),
+    ]
+    combined = " ".join(_normalized_text(value) for value in text_candidates)
+    return any(term in combined for term in EXCLUDED_BOSS_TERMS)
 
 
 class UwULogsClient:
@@ -29,7 +70,7 @@ class UwULogsClient:
         response = requests.get(
             endpoint,
             timeout=self.timeout,
-            headers={"User-Agent": "RaidPresenceReporter/0.1.1"},
+            headers={"User-Agent": "RaidPresenceReporter/0.1.2"},
         )
         response.raise_for_status()
         return response.json()
@@ -75,9 +116,11 @@ class UwULogsClient:
                 rank = data.get("overall_rank")
                 rank = int(rank) if isinstance(rank, (int, float)) else None
 
-                best_parse = None
-                for boss_data in bosses.values():
+                included_parses: list[float] = []
+                for boss_key, boss_data in bosses.items():
                     if not isinstance(boss_data, dict):
+                        continue
+                    if _is_excluded_boss(boss_key, boss_data):
                         continue
                     candidate = self._number(
                         boss_data,
@@ -87,16 +130,23 @@ class UwULogsClient:
                         "dps_percent",
                     )
                     if candidate is not None:
-                        best_parse = candidate if best_parse is None else max(best_parse, candidate)
+                        included_parses.append(candidate)
+
+                # Le score du personnage est recalculé uniquement avec les boss retenus.
+                parse_average = (
+                    round(sum(included_parses) / len(included_parses), 1)
+                    if included_parses else None
+                )
+                best_parse = max(included_parses) if included_parses else None
 
                 result = ParseResult(
                     main=main,
                     character=character,
                     spec=str(spec),
-                    overall_points=points,
+                    overall_points=parse_average,
                     overall_rank=rank,
                     best_parse=best_parse,
-                    boss_count=len(bosses),
+                    boss_count=len(included_parses),
                     source_url=self.character_url(server, character, spec),
                     status="OK",
                 )

@@ -67,3 +67,9 @@ Consulte `GITHUB_INSTALLATION.md`. Le workflow `.github/workflows/build-windows.
 - Un joueur présent plusieurs fois sur le même NPC ID n'est compté qu'une fois pour cet ID.
 - La feuille `Boss` est remplacée par `NPC ID`, avec une ligne par identifiant unique.
 - La feuille `Historique` conserve toujours le détail de tous les kills et présences.
+
+
+## Règles v0.1.2
+
+- La présence est calculée par ID ICC complète, pas par boss.
+- Toravon, Halion, Anub’arak et Valithria sont toujours ignorés pour le calcul du meilleur personnage UwULogs.

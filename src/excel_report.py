@@ -38,7 +38,7 @@ def create_excel(
 ) -> None:
     bosses = [b for b in data.bosses if start_date <= b.date.date() <= end_date]
     boss_keys = {(b.raid_id, b.npc_id) for b in bosses}
-    boss_ids = {b.npc_id for b in bosses}
+    raid_ids = {b.raid_id for b in bosses}
     attendance = [
         a for a in data.attendance
         if start_date <= a.date.date() <= end_date
@@ -51,15 +51,15 @@ def create_excel(
         | {p.main for p in data.parses}
     )
 
-    present_ids_by_main: dict[str, set[int]] = defaultdict(set)
+    present_raids_by_main: dict[str, set[str]] = defaultdict(set)
     char_used: dict[str, set[str]] = defaultdict(set)
     for row in attendance:
-        present_ids_by_main[row.main].add(row.npc_id)
+        present_raids_by_main[row.main].add(row.raid_id)
         char_used[row.main].add(row.character)
 
     best_parse = _best_parse_by_main(data.parses)
-    total_ids = len(boss_ids)
-    distinct_presence_count = sum(len(ids) for ids in present_ids_by_main.values())
+    total_ids = len(raid_ids)
+    distinct_presence_count = sum(len(ids) for ids in present_raids_by_main.values())
 
     workbook = xlsxwriter.Workbook(str(output_path))
     workbook.set_properties({
@@ -96,21 +96,21 @@ def create_excel(
     ws.write("B4", f"{start_date:%d/%m/%Y} au {end_date:%d/%m/%Y}", fmt_cell)
     ws.write("A5", "Sessions de test incluses", fmt_header)
     ws.write("B5", "Oui" if include_tests else "Non", fmt_cell)
-    ws.write("A7", "NPC ID uniques", fmt_header)
+    ws.write("A7", "ID ICC", fmt_header)
     ws.write("B7", total_ids, fmt_kpi)
     ws.write("D7", "Mains", fmt_header)
     ws.write("E7", len(mains), fmt_kpi)
-    ws.write("G7", "Couples Main / ID", fmt_header)
+    ws.write("G7", "Présences aux ID", fmt_header)
     ws.write("H7", distinct_presence_count, fmt_kpi)
 
     summary_start = 10
-    headers = ["Main", "ID présents", "ID total", "Couverture", "Meilleur personnage", "Points UwU", "Best parse", "Statut"]
+    headers = ["Main", "ID présentes", "ID total", "Présence", "Meilleur personnage", "Parse moyen", "Meilleur parse", "Statut"]
     for col, value in enumerate(headers):
         ws.write(summary_start, col, value, fmt_header)
 
     for idx, main in enumerate(mains, summary_start + 1):
         p = best_parse.get(main)
-        count = len(present_ids_by_main.get(main, set()))
+        count = len(present_raids_by_main.get(main, set()))
         ws.write(idx, 0, main, fmt_cell)
         ws.write(idx, 1, count, fmt_center)
         ws.write(idx, 2, total_ids, fmt_center)
@@ -132,7 +132,7 @@ def create_excel(
             "values": ["Tableau de bord", summary_start + 1, 3, summary_start + len(mains), 3],
             "data_labels": {"value": True, "num_format": "0%"},
         })
-        chart.set_title({"name": "Couverture des NPC ID par main"})
+        chart.set_title({"name": "Présence aux ID ICC par main"})
         chart.set_y_axis({"num_format": "0%", "min": 0, "max": 1})
         chart.set_legend({"none": True})
         ws.insert_chart("J4", chart, {"x_scale": 1.25, "y_scale": 1.15})
@@ -146,7 +146,7 @@ def create_excel(
 
     # Présences
     ws = workbook.add_worksheet("Présences")
-    headers = ["Main", "Personnage(s)", "ID présents", "ID total", "Couverture", "Meilleur perso UwU", "Points", "Best parse"]
+    headers = ["Main", "Personnage(s)", "ID présentes", "ID total", "Présence", "Meilleur perso UwU", "Parse moyen", "Meilleur parse"]
     for col, value in enumerate(headers):
         ws.write(0, col, value, fmt_header)
     for row_idx, main in enumerate(mains, 1):
@@ -154,7 +154,7 @@ def create_excel(
         characters = sorted(data.characters_by_main.get(main, set()) | char_used.get(main, set()))
         ws.write(row_idx, 0, main, fmt_cell)
         ws.write(row_idx, 1, ", ".join(characters), fmt_cell)
-        ws.write(row_idx, 2, len(present_ids_by_main.get(main, set())), fmt_center)
+        ws.write(row_idx, 2, len(present_raids_by_main.get(main, set())), fmt_center)
         ws.write(row_idx, 3, total_ids, fmt_center)
         ws.write_formula(row_idx, 4, f'=IF(D{row_idx+1}=0,0,C{row_idx+1}/D{row_idx+1})', fmt_pct)
         ws.write(row_idx, 5, p.character if p else "", fmt_cell)

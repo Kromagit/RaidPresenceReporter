@@ -38,6 +38,7 @@ def create_excel(
 ) -> None:
     bosses = [b for b in data.bosses if start_date <= b.date.date() <= end_date]
     boss_keys = {(b.raid_id, b.npc_id) for b in bosses}
+    boss_ids = {b.npc_id for b in bosses}
     attendance = [
         a for a in data.attendance
         if start_date <= a.date.date() <= end_date
@@ -50,14 +51,15 @@ def create_excel(
         | {p.main for p in data.parses}
     )
 
-    present_by_main: dict[str, set[tuple[str, int]]] = defaultdict(set)
+    present_ids_by_main: dict[str, set[int]] = defaultdict(set)
     char_used: dict[str, set[str]] = defaultdict(set)
     for row in attendance:
-        present_by_main[row.main].add((row.raid_id, row.npc_id))
+        present_ids_by_main[row.main].add(row.npc_id)
         char_used[row.main].add(row.character)
 
     best_parse = _best_parse_by_main(data.parses)
-    total_bosses = len(boss_keys)
+    total_ids = len(boss_ids)
+    distinct_presence_count = sum(len(ids) for ids in present_ids_by_main.values())
 
     workbook = xlsxwriter.Workbook(str(output_path))
     workbook.set_properties({
@@ -77,6 +79,7 @@ def create_excel(
     fmt_cell = workbook.add_format({"border": 1, "valign": "top"})
     fmt_center = workbook.add_format({"border": 1, "align": "center"})
     fmt_pct = workbook.add_format({"border": 1, "num_format": "0.0%"})
+    fmt_parse = workbook.add_format({"border": 1, "align": "center", "num_format": "0.0"})
     fmt_date = workbook.add_format({"border": 1, "num_format": "dd/mm/yyyy hh:mm"})
     fmt_kpi = workbook.add_format({
         "bold": True, "font_size": 14, "align": "center",
@@ -93,28 +96,28 @@ def create_excel(
     ws.write("B4", f"{start_date:%d/%m/%Y} au {end_date:%d/%m/%Y}", fmt_cell)
     ws.write("A5", "Sessions de test incluses", fmt_header)
     ws.write("B5", "Oui" if include_tests else "Non", fmt_cell)
-    ws.write("A7", "Boss enregistrés", fmt_header)
-    ws.write("B7", total_bosses, fmt_kpi)
+    ws.write("A7", "NPC ID uniques", fmt_header)
+    ws.write("B7", total_ids, fmt_kpi)
     ws.write("D7", "Mains", fmt_header)
     ws.write("E7", len(mains), fmt_kpi)
-    ws.write("G7", "Présences", fmt_header)
-    ws.write("H7", len(attendance), fmt_kpi)
+    ws.write("G7", "Couples Main / ID", fmt_header)
+    ws.write("H7", distinct_presence_count, fmt_kpi)
 
     summary_start = 10
-    headers = ["Main", "Boss présents", "Boss total", "Présence", "Meilleur personnage", "Points UwU", "Best parse", "Statut"]
+    headers = ["Main", "ID présents", "ID total", "Couverture", "Meilleur personnage", "Points UwU", "Best parse", "Statut"]
     for col, value in enumerate(headers):
         ws.write(summary_start, col, value, fmt_header)
 
     for idx, main in enumerate(mains, summary_start + 1):
         p = best_parse.get(main)
-        count = len(present_by_main.get(main, set()))
+        count = len(present_ids_by_main.get(main, set()))
         ws.write(idx, 0, main, fmt_cell)
         ws.write(idx, 1, count, fmt_center)
-        ws.write(idx, 2, total_bosses, fmt_center)
+        ws.write(idx, 2, total_ids, fmt_center)
         ws.write_formula(idx, 3, f'=IF(C{idx+1}=0,0,B{idx+1}/C{idx+1})', fmt_pct)
         ws.write(idx, 4, p.character if p else "", fmt_cell)
-        ws.write(idx, 5, p.overall_points if p and p.overall_points is not None else "", fmt_center)
-        ws.write(idx, 6, p.best_parse if p and p.best_parse is not None else "", fmt_center)
+        ws.write(idx, 5, p.overall_points if p and p.overall_points is not None else "", fmt_parse)
+        ws.write(idx, 6, p.best_parse if p and p.best_parse is not None else "", fmt_parse)
         ws.write(idx, 7, p.status if p else "Aucune donnée", fmt_cell)
 
     if mains:
@@ -129,7 +132,7 @@ def create_excel(
             "values": ["Tableau de bord", summary_start + 1, 3, summary_start + len(mains), 3],
             "data_labels": {"value": True, "num_format": "0%"},
         })
-        chart.set_title({"name": "Taux de présence par main"})
+        chart.set_title({"name": "Couverture des NPC ID par main"})
         chart.set_y_axis({"num_format": "0%", "min": 0, "max": 1})
         chart.set_legend({"none": True})
         ws.insert_chart("J4", chart, {"x_scale": 1.25, "y_scale": 1.15})
@@ -143,7 +146,7 @@ def create_excel(
 
     # Présences
     ws = workbook.add_worksheet("Présences")
-    headers = ["Main", "Personnage(s)", "Boss présents", "Boss total", "Présence", "Meilleur perso UwU", "Points", "Best parse"]
+    headers = ["Main", "Personnage(s)", "ID présents", "ID total", "Couverture", "Meilleur perso UwU", "Points", "Best parse"]
     for col, value in enumerate(headers):
         ws.write(0, col, value, fmt_header)
     for row_idx, main in enumerate(mains, 1):
@@ -151,12 +154,12 @@ def create_excel(
         characters = sorted(data.characters_by_main.get(main, set()) | char_used.get(main, set()))
         ws.write(row_idx, 0, main, fmt_cell)
         ws.write(row_idx, 1, ", ".join(characters), fmt_cell)
-        ws.write(row_idx, 2, len(present_by_main.get(main, set())), fmt_center)
-        ws.write(row_idx, 3, total_bosses, fmt_center)
+        ws.write(row_idx, 2, len(present_ids_by_main.get(main, set())), fmt_center)
+        ws.write(row_idx, 3, total_ids, fmt_center)
         ws.write_formula(row_idx, 4, f'=IF(D{row_idx+1}=0,0,C{row_idx+1}/D{row_idx+1})', fmt_pct)
         ws.write(row_idx, 5, p.character if p else "", fmt_cell)
-        ws.write(row_idx, 6, p.overall_points if p and p.overall_points is not None else "", fmt_center)
-        ws.write(row_idx, 7, p.best_parse if p and p.best_parse is not None else "", fmt_center)
+        ws.write(row_idx, 6, p.overall_points if p and p.overall_points is not None else "", fmt_parse)
+        ws.write(row_idx, 7, p.best_parse if p and p.best_parse is not None else "", fmt_parse)
     ws.autofilter(0, 0, max(len(mains), 1), len(headers) - 1)
     ws.freeze_panes(1, 0)
     ws.set_column("A:A", 20)
@@ -165,31 +168,41 @@ def create_excel(
     ws.set_column("F:F", 22)
     ws.set_column("G:H", 13)
 
-    # Boss
-    ws = workbook.add_worksheet("Boss")
-    headers = ["Date", "Instance", "NPC ID", "Difficulté", "Présents", "Session", "Temporaire"]
+    # NPC ID uniques
+    ws = workbook.add_worksheet("NPC ID")
+    headers = ["NPC ID", "Instance(s)", "Première détection", "Dernière détection", "Difficulté(s)", "Sessions", "Mains présentes"]
     for col, value in enumerate(headers):
         ws.write(0, col, value, fmt_header)
-    attendance_count = defaultdict(int)
-    for a in attendance:
-        attendance_count[(a.raid_id, a.npc_id)] += 1
-    for idx, boss in enumerate(bosses, 1):
-        ws.write_datetime(idx, 0, boss.date, fmt_date)
-        ws.write(idx, 1, boss.instance, fmt_cell)
-        ws.write(idx, 2, boss.npc_id, fmt_center)
-        ws.write(idx, 3, boss.difficulty, fmt_cell)
-        ws.write(idx, 4, attendance_count[(boss.raid_id, boss.npc_id)], fmt_center)
-        ws.write(idx, 5, boss.raid_id, fmt_cell)
-        ws.write(idx, 6, "Oui" if boss.temporary else "Non", fmt_center)
-    ws.autofilter(0, 0, max(len(bosses), 1), len(headers) - 1)
+
+    bosses_by_id = defaultdict(list)
+    mains_by_id = defaultdict(set)
+    for boss in bosses:
+        bosses_by_id[boss.npc_id].append(boss)
+    for row in attendance:
+        mains_by_id[row.npc_id].add(row.main)
+
+    for idx, npc_id in enumerate(sorted(bosses_by_id), 1):
+        rows = bosses_by_id[npc_id]
+        instances = sorted({row.instance for row in rows if row.instance})
+        difficulties = sorted({row.difficulty for row in rows if row.difficulty})
+        sessions = {row.raid_id for row in rows}
+        dates = sorted(row.date for row in rows)
+
+        ws.write(idx, 0, npc_id, fmt_center)
+        ws.write(idx, 1, ", ".join(instances), fmt_cell)
+        ws.write_datetime(idx, 2, dates[0], fmt_date)
+        ws.write_datetime(idx, 3, dates[-1], fmt_date)
+        ws.write(idx, 4, ", ".join(difficulties), fmt_cell)
+        ws.write(idx, 5, len(sessions), fmt_center)
+        ws.write(idx, 6, len(mains_by_id[npc_id]), fmt_center)
+
+    ws.autofilter(0, 0, max(len(bosses_by_id), 1), len(headers) - 1)
     ws.freeze_panes(1, 0)
-    ws.set_column("A:A", 19)
-    ws.set_column("B:B", 25)
-    ws.set_column("C:C", 10)
-    ws.set_column("D:D", 16)
-    ws.set_column("E:E", 10)
-    ws.set_column("F:F", 55)
-    ws.set_column("G:G", 11)
+    ws.set_column("A:A", 11)
+    ws.set_column("B:B", 28)
+    ws.set_column("C:D", 19)
+    ws.set_column("E:E", 22)
+    ws.set_column("F:G", 14)
 
     # Historique
     ws = workbook.add_worksheet("Historique")
@@ -218,16 +231,16 @@ def create_excel(
 
     # Parses
     ws = workbook.add_worksheet("Parses UwULogs")
-    headers = ["Main", "Personnage", "Spé", "Points globaux", "Rang global", "Best parse", "Boss connus", "Statut", "Source"]
+    headers = ["Main", "Personnage", "Spé", "Points globaux", "Rang global", "Best parse", "NPC ID connus", "Statut", "Source"]
     for col, value in enumerate(headers):
         ws.write(0, col, value, fmt_header)
     for idx, row in enumerate(data.parses, 1):
         ws.write(idx, 0, row.main, fmt_cell)
         ws.write(idx, 1, row.character, fmt_cell)
         ws.write(idx, 2, row.spec, fmt_center)
-        ws.write(idx, 3, row.overall_points if row.overall_points is not None else "", fmt_center)
+        ws.write(idx, 3, row.overall_points if row.overall_points is not None else "", fmt_parse)
         ws.write(idx, 4, row.overall_rank if row.overall_rank is not None else "", fmt_center)
-        ws.write(idx, 5, row.best_parse if row.best_parse is not None else "", fmt_center)
+        ws.write(idx, 5, row.best_parse if row.best_parse is not None else "", fmt_parse)
         ws.write(idx, 6, row.boss_count, fmt_center)
         ws.write(idx, 7, row.status, fmt_cell)
         if row.source_url:

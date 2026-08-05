@@ -20,7 +20,7 @@ from uwulogs import UwULogsClient, load_manual_csv
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("RaidPresence Reporter v0.1")
+        self.title("RaidPresence Reporter v0.1.1")
         self.geometry("820x600")
         self.minsize(760, 560)
 

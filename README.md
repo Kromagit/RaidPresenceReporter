@@ -1,4 +1,4 @@
-# RaidPresence Reporter v0.1
+# RaidPresence Reporter v0.1.1
 
 Application Windows/Python qui :
 
@@ -57,3 +57,13 @@ Le programme sera placé dans `dist\RaidPresenceReporter.exe`.
 ## EXE automatique par GitHub
 
 Consulte `GITHUB_INSTALLATION.md`. Le workflow `.github/workflows/build-windows.yml` compile l'EXE sur `windows-latest` et le joint automatiquement aux Releases créées avec un tag `v*`.
+
+
+## Modifications v0.1.1
+
+- Normalisation des valeurs UwULogs : `8934.187...` devient `89.3`.
+- Affichage des parses avec une décimale dans Excel.
+- Les statistiques de présence utilisent désormais les NPC ID uniques.
+- Un joueur présent plusieurs fois sur le même NPC ID n'est compté qu'une fois pour cet ID.
+- La feuille `Boss` est remplacée par `NPC ID`, avec une ligne par identifiant unique.
+- La feuille `Historique` conserve toujours le détail de tous les kills et présences.

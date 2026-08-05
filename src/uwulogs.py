@@ -29,17 +29,31 @@ class UwULogsClient:
         response = requests.get(
             endpoint,
             timeout=self.timeout,
-            headers={"User-Agent": "RaidPresenceReporter/0.1"},
+            headers={"User-Agent": "RaidPresenceReporter/0.1.1"},
         )
         response.raise_for_status()
         return response.json()
 
     @staticmethod
-    def _number(data: dict[str, Any], *keys: str) -> float | None:
+    def _normalize_parse(value: float | int | None) -> float | None:
+        if value is None:
+            return None
+
+        result = float(value)
+
+        # UwULogs renvoie parfois les pourcentages multipliés par 100
+        # (ex. 8934.18 pour un parse de 89.34).
+        if abs(result) > 100:
+            result = result / 100.0
+
+        return round(result, 1)
+
+    @classmethod
+    def _number(cls, data: dict[str, Any], *keys: str) -> float | None:
         for key in keys:
             value = data.get(key)
             if isinstance(value, (int, float)):
-                return float(value)
+                return cls._normalize_parse(value)
         return None
 
     def best_for_character(
@@ -124,7 +138,12 @@ def load_manual_csv(path: str | Path) -> list[ParseResult]:
             def number(name: str) -> float | None:
                 raw = (row.get(name) or "").strip().replace(",", ".")
                 try:
-                    return float(raw) if raw else None
+                    if not raw:
+                        return None
+                    value = float(raw)
+                    if abs(value) > 100:
+                        value = value / 100.0
+                    return round(value, 1)
                 except ValueError:
                     return None
 

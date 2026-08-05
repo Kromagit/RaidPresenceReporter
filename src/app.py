@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import calendar
+import json
+import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -17,30 +19,54 @@ from report_data import build_report_data
 from uwulogs import UwULogsClient, load_manual_csv
 
 
+APP_VERSION = "0.1.3"
+
+
+def settings_path() -> Path:
+    """Return a stable per-user path, including when running as a one-file EXE."""
+    appdata = os.environ.get("APPDATA")
+    base = Path(appdata) if appdata else Path.home() / ".raidpresence_reporter"
+    return base / "RaidPresenceReporter" / "settings.json"
+
+
+def load_settings() -> dict[str, object]:
+    path = settings_path()
+    try:
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        pass
+    return {}
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("RaidPresence Reporter v0.1.1")
+        self.title(f"RaidPresence Reporter v{APP_VERSION}")
         self.geometry("820x600")
         self.minsize(760, 560)
 
         today = date.today()
-        self.lua_path = tk.StringVar()
-        self.output_path = tk.StringVar(
-            value=str(Path.home() / f"Rapport_RaidPresence_{today:%Y-%m}.xlsx")
-        )
-        self.csv_path = tk.StringVar()
-        self.server = tk.StringVar(value="Icecrown")
-        self.period = tk.StringVar(value="Mois en cours")
+        saved = load_settings()
+        default_output = str(Path.home() / f"Rapport_RaidPresence_{today:%Y-%m}.xlsx")
+
+        self.lua_path = tk.StringVar(value=str(saved.get("lua_path") or ""))
+        self.output_path = tk.StringVar(value=str(saved.get("output_path") or default_output))
+        self.csv_path = tk.StringVar(value=str(saved.get("csv_path") or ""))
+        self.server = tk.StringVar(value=str(saved.get("server") or "Icecrown"))
+        self.period = tk.StringVar(value=str(saved.get("period") or "Mois en cours"))
         self.start_date = tk.StringVar(value=today.replace(day=1).isoformat())
         self.end_date = tk.StringVar(
             value=date(today.year, today.month, calendar.monthrange(today.year, today.month)[1]).isoformat()
         )
-        self.include_tests = tk.BooleanVar(value=False)
-        self.download_uwu = tk.BooleanVar(value=True)
+        self.include_tests = tk.BooleanVar(value=bool(saved.get("include_tests", False)))
+        self.download_uwu = tk.BooleanVar(value=bool(saved.get("download_uwu", True)))
         self.status = tk.StringVar(value="Prêt.")
 
         self._build()
+        self._update_period()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build(self):
         frame = ttk.Frame(self, padding=16)
@@ -70,7 +96,7 @@ class App(tk.Tk):
             ],
         )
         period_box.grid(row=5, column=1, sticky="ew", pady=6)
-        period_box.bind("<<ComboboxSelected>>", lambda _e: self._update_period())
+        period_box.bind("<<ComboboxSelected>>", lambda _e: self._period_changed())
 
         ttk.Label(frame, text="Date début (AAAA-MM-JJ)").grid(row=6, column=0, sticky="w", pady=6)
         ttk.Entry(frame, textvariable=self.start_date).grid(row=6, column=1, sticky="ew", pady=6)
@@ -81,12 +107,14 @@ class App(tk.Tk):
             frame,
             text="Télécharger les données publiques UwULogs",
             variable=self.download_uwu,
+            command=self._save_settings,
         ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(12, 4))
 
         ttk.Checkbutton(
             frame,
             text="Inclure les sessions temporaires de donjon",
             variable=self.include_tests,
+            command=self._save_settings,
         ).grid(row=9, column=0, columnspan=2, sticky="w", pady=4)
 
         ttk.Button(frame, text="Générer Excel", command=self.generate).grid(
@@ -110,23 +138,68 @@ class App(tk.Tk):
         ttk.Entry(frame, textvariable=variable).grid(row=row, column=1, sticky="ew", pady=6)
         ttk.Button(frame, text="Parcourir", command=command).grid(row=row, column=2, padx=(8, 0), pady=6)
 
+    def _settings_dict(self) -> dict[str, object]:
+        return {
+            "lua_path": self.lua_path.get().strip(),
+            "output_path": self.output_path.get().strip(),
+            "csv_path": self.csv_path.get().strip(),
+            "server": self.server.get().strip(),
+            "period": self.period.get(),
+            "include_tests": self.include_tests.get(),
+            "download_uwu": self.download_uwu.get(),
+        }
+
+    def _save_settings(self) -> None:
+        path = settings_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(self._settings_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            # The report must remain usable even when settings cannot be saved.
+            self._write_log(f"Paramètres non enregistrés : {exc}")
+
+    def _on_close(self) -> None:
+        self._save_settings()
+        self.destroy()
+
     def _pick_lua(self):
-        path = filedialog.askopenfilename(filetypes=[("Lua", "*.lua"), ("Tous", "*.*")])
+        initial = Path(self.lua_path.get()).parent if self.lua_path.get() else Path.home()
+        path = filedialog.askopenfilename(
+            initialdir=str(initial) if initial.exists() else None,
+            filetypes=[("Lua", "*.lua"), ("Tous", "*.*")],
+        )
         if path:
             self.lua_path.set(path)
+            self._save_settings()
 
     def _pick_output(self):
+        current = Path(self.output_path.get()) if self.output_path.get() else None
         path = filedialog.asksaveasfilename(
+            initialdir=str(current.parent) if current and current.parent.exists() else None,
+            initialfile=current.name if current else None,
             defaultextension=".xlsx",
             filetypes=[("Excel", "*.xlsx")],
         )
         if path:
             self.output_path.set(path)
+            self._save_settings()
 
     def _pick_csv(self):
-        path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("Tous", "*.*")])
+        initial = Path(self.csv_path.get()).parent if self.csv_path.get() else Path.home()
+        path = filedialog.askopenfilename(
+            initialdir=str(initial) if initial.exists() else None,
+            filetypes=[("CSV", "*.csv"), ("Tous", "*.*")],
+        )
         if path:
             self.csv_path.set(path)
+            self._save_settings()
+
+    def _period_changed(self) -> None:
+        self._update_period()
+        self._save_settings()
 
     def _update_period(self):
         today = date.today()
@@ -151,6 +224,8 @@ class App(tk.Tk):
 
     def generate(self):
         try:
+            self._save_settings()
+
             lua_path = Path(self.lua_path.get())
             if not lua_path.is_file():
                 raise ValueError("Sélectionne un fichier RaidPresence.lua valide.")
@@ -172,7 +247,7 @@ class App(tk.Tk):
             manual = []
             if self.csv_path.get():
                 manual = load_manual_csv(self.csv_path.get())
-                self._write_log(f"{len(manual)} ligne(s) UwULogs importée(s) depuis CSV.")
+                self._write_log(f"{len(manual)} ligne(s) UwULogs retenue(s) depuis CSV.")
 
             manual_keys = {(p.main.casefold(), p.character.casefold()) for p in manual}
             data.parses.extend(manual)
@@ -192,7 +267,11 @@ class App(tk.Tk):
                             continue
                         self.status.set(f"UwULogs {done}/{characters_total} : {character}")
                         self._write_log(f"UwULogs : {character} ({main})")
-                        data.parses.append(client.best_for_character(main, character, server))
+                        result = client.best_for_character(main, character, server)
+                        if result.status.startswith("Spécialisation ignorée"):
+                            self._write_log(f"  Ignoré : {result.status}")
+                        else:
+                            data.parses.append(result)
 
             output.parent.mkdir(parents=True, exist_ok=True)
             self.status.set("Création du fichier Excel...")
@@ -205,6 +284,7 @@ class App(tk.Tk):
             )
             self._write_log(f"Fichier créé : {output}")
             self.status.set("Terminé.")
+            self._save_settings()
             messagebox.showinfo("RaidPresence Reporter", f"Rapport créé :\n{output}")
 
         except Exception as exc:

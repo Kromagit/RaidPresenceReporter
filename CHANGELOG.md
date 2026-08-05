@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.3
+
+- Mémorisation des chemins de fichiers et des options entre les lancements.
+- Filtrage UwULogs limité à Fury, Combat, Retribution, Unholy, Feral DPS, Fire, Balance, Shadow, Demonology et Marksmanship.
+- Les spécialisations non retenues sont ignorées dans le rapport.
+
 ## v0.1.2
 
 - Présence calculée par ID ICC complète (`raidID`).

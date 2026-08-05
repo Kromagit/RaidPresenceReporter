@@ -1,4 +1,4 @@
-# RaidPresence Reporter v0.1.1
+# RaidPresence Reporter v0.1.3
 
 Application Windows/Python qui :
 
@@ -73,3 +73,12 @@ Consulte `GITHUB_INSTALLATION.md`. Le workflow `.github/workflows/build-windows.
 
 - La présence est calculée par ID ICC complète, pas par boss.
 - Toravon, Halion, Anub’arak et Valithria sont toujours ignorés pour le calcul du meilleur personnage UwULogs.
+
+
+## Modifications v0.1.3
+
+- Les chemins `RaidPresence.lua`, Excel et CSV sont mémorisés entre deux lancements.
+- Le serveur et les options principales sont également mémorisés.
+- Les paramètres sont enregistrés dans `%APPDATA%\RaidPresenceReporter\settings.json` sous Windows.
+- Seules les spécialisations suivantes sont utilisées pour les parses : Fury, Combat, Retribution, Unholy, Feral DPS, Fire, Balance, Shadow, Demonology et Marksmanship.
+- Les spécialisations non retenues ne sont pas affichées dans le rapport UwULogs.
